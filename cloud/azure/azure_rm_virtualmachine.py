@@ -39,6 +39,12 @@ options:
         description:
             - Name of the resource group containing the virtual machine.
         required: true
+    
+    vnet_resource_group:
+        description:
+            - Name of the resource group containing the virtual machines NIC.
+        required: false
+    
     name:
         description:
             - Name of the virtual machine.
@@ -456,6 +462,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
         self.module_arg_spec = dict(
             resource_group=dict(type='str', required=True),
+            vnet_resource_group=dict(type='str'),
             name=dict(type='str', required=True),
             state=dict(choices=['present', 'absent'], default='present', type='str'),
             location=dict(type='str'),
@@ -488,6 +495,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             self.module_arg_spec['vm_size']['choices'].append(getattr(key, 'value'))
 
         self.resource_group = None
+        self.vnet_resource_group = None
         self.name = None
         self.state = None
         self.location = None
@@ -544,6 +552,11 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
         vm_dict = None
 
         resource_group = self.get_resource_group(self.resource_group)
+        
+        if not self.vnet_resource_group:
+            #Set default VNet resource group to the vm's resource group
+            self.vnet_resource_group =self.resource_group
+            
         if not self.location:
             # Set default location
             self.location = resource_group.location
@@ -1008,7 +1021,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
     def get_network_interface(self, name):
         try:
-            nic = self.network_client.network_interfaces.get(self.resource_group, name)
+            nic = self.network_client.network_interfaces.get(self.vnet_resource_group, name)
             return nic
         except Exception as exc:
             self.fail("Error fetching network interface {0} - {1}".format(name, str(exc)))
@@ -1017,7 +1030,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
         self.log("Deleting network interface {0}".format(name))
         self.results['actions'].append("Deleted network interface {0}".format(name))
         try:
-            poller = self.network_client.network_interfaces.delete(self.resource_group, name)
+            poller = self.network_client.network_interfaces.delete(self.vnet_resource_group, name)
         except Exception as exc:
             self.fail("Error deleting network interface {0} - {1}".format(name, str(exc)))
         self.get_poller_result(poller)
@@ -1171,7 +1184,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
         self.log("Create default NIC {0}".format(network_interface_name))
         self.log("Check to see if NIC {0} exists".format(network_interface_name))
         try:
-            nic = self.network_client.network_interfaces.get(self.resource_group, network_interface_name)
+            nic = self.network_client.network_interfaces.get(self.vnet_resource_group, network_interface_name)
         except CloudError:
             pass
 
@@ -1184,7 +1197,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
         if self.virtual_network_name:
             try:
-                self.network_client.virtual_networks.list(self.resource_group, self.virtual_network_name)
+                self.network_client.virtual_networks.list(self.vnet_resource_group, self.virtual_network_name)
                 virtual_network_name = self.virtual_network_name
             except Exception as exc:
                 self.fail("Error: fetching virtual network {0} - {1}".format(self.virtual_network_name, str(exc)))
@@ -1192,11 +1205,11 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             # Find a virtual network
             no_vnets_msg = "Error: unable to find virtual network in resource group {0}. A virtual network " \
                            "with at least one subnet must exist in order to create a NIC for the virtual " \
-                           "machine.".format(self.resource_group)
+                           "machine.".format(self.vnet_resource_group)
 
             virtual_network_name = None
             try:
-                vnets = self.network_client.virtual_networks.list(self.resource_group)
+                vnets = self.network_client.virtual_networks.list(self.vnet_resource_group)
             except CloudError:
                 self.log('cloud error!')
                 self.fail(no_vnets_msg)
@@ -1211,7 +1224,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
         if self.subnet_name:
             try:
-                subnet = self.network_client.subnets.get(self.resource_group, virtual_network_name)
+                subnet = self.network_client.subnets.get(self.vnet_resource_group, virtual_network_name)
                 subnet_id = subnet.id
             except Exception as exc:
                 self.fail("Error: fetching subnet {0} - {1}".format(self.subnet_name, str(exc)))
@@ -1222,7 +1235,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
             subnet_id = None
             try:
-                subnets = self.network_client.subnets.list(self.resource_group, virtual_network_name)
+                subnets = self.network_client.subnets.list(self.vnet_resource_group, virtual_network_name)
             except CloudError:
                 self.fail(no_subnets_msg)
 
@@ -1265,7 +1278,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
         self.log(self.serialize_obj(parameters, 'NetworkInterface'), pretty_print=True)
         self.results['actions'].append("Created NIC {0}".format(network_interface_name))
         try:
-            poller = self.network_client.network_interfaces.create_or_update(self.resource_group,
+            poller = self.network_client.network_interfaces.create_or_update(self.vnet_resource_group,
                                                                              network_interface_name,
                                                                              parameters)
             new_nic = self.get_poller_result(poller)
